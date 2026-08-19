@@ -24,6 +24,12 @@ USER_GID="$(id -g "$USERNAME")"
 
 echo
 echo "[1/9] Sinkronisasi repositori & update..."
+# XBPS meng-update dirinya sendiri dalam transaksi terpisah. Kalau paket
+# xbps ikut ter-update di run pertama, sinkronisasi repodata untuk paket
+# lain jadi belum lengkap dan install berikutnya bisa gagal dengan pesan
+# "Package 'xxx' not found in repository pool" walau paketnya sebenarnya
+# ada di repo. Jalankan dua kali supaya repodata benar-benar tersinkron.
+xbps-install -Syu
 xbps-install -Syu
 
 echo
