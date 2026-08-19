@@ -3,100 +3,44 @@
 set -eu
 
 echo "========================================"
-echo " Void Linux Sway Setup"
+echo " Void Linux Sway Setup (Optimized)"
 echo " Toshiba Satellite P755"
 echo "========================================"
 
-# ============================================================
-# ROOT CHECK
-# ============================================================
-
 if [ "$(id -u)" -ne 0 ]; then
-    echo
-    echo "ERROR: Script harus dijalankan sebagai root."
-    echo
-    echo "Gunakan:"
-    echo "  sudo ./setup.sh"
-    echo
+    echo "Jalankan script dengan: sudo sh setup.sh"
     exit 1
 fi
 
-# ============================================================
-# DETECT NORMAL USER
-# ============================================================
-
 USERNAME="${SUDO_USER:-}"
 
-# Kalau dijalankan langsung dari root shell,
-# cari user biasa dari /home.
-if [ -z "$USERNAME" ] || [ "$USERNAME" = "root" ]; then
-
-    if [ -d /home ]; then
-        for DIR in /home/*; do
-            if [ -d "$DIR" ]; then
-                USERNAME="$(basename "$DIR")"
-                break
-            fi
-        done
-    fi
-fi
-
-if [ -z "${USERNAME:-}" ] || [ "$USERNAME" = "root" ]; then
-    echo
-    echo "ERROR: Tidak dapat menentukan user biasa."
-    echo
-    echo "User biasa harus mempunyai home directory seperti:"
-    echo "  /home/username"
-    echo
-    echo "Buat user biasa terlebih dahulu."
+if [ -z "$USERNAME" ]; then
+    echo "Gagal mendeteksi user reguler. Jalankan dengan sudo."
     exit 1
 fi
 
 USER_HOME="$(getent passwd "$USERNAME" | cut -d: -f6)"
-
-if [ -z "$USER_HOME" ] || [ ! -d "$USER_HOME" ]; then
-    echo
-    echo "ERROR: Home directory user tidak ditemukan."
-    echo "User: $USERNAME"
-    echo
-    exit 1
-fi
-
-USER_GROUP="$(id -gn "$USERNAME")"
-USER_UID="$(id -u "$USERNAME")"
+USER_GID="$(id -g "$USERNAME")"
 
 echo
-echo "Detected user : $USERNAME"
-echo "Home          : $USER_HOME"
-echo "UID           : $USER_UID"
-echo "Group         : $USER_GROUP"
-echo
-
-# ============================================================
-# UPDATE REPOSITORY
-# ============================================================
-
-echo "[1/10] Updating repository..."
-
-xbps-install -S
-
-# ============================================================
-# INSTALL PACKAGES
-# ============================================================
+echo "[1/9] Sinkronisasi repositori & update..."
+xbps-install -Syu
 
 echo
-echo "[2/10] Installing packages..."
-
+echo "[2/9] Instalasi paket pendukung..."
 xbps-install -y \
     sway \
     swaybg \
-    Waybar \
+    swaylock \
+    swayidle \
+    waybar \
     foot \
     fuzzel \
     mako \
     thunar \
     pipewire \
     wireplumber \
+    pavucontrol \
     NetworkManager \
     seatd \
     dbus \
@@ -108,36 +52,28 @@ xbps-install -y \
     curl \
     wget \
     dejavu-fonts-ttf \
-    swaylock \
-    swayidle \
     brightnessctl \
     grim \
     slurp \
+    wl-clipboard \
     gvfs \
     zramen \
-    tlp \
-    pavucontrol
-
-# ============================================================
-# ENABLE RUNIT SERVICES
-# ============================================================
+    tlp
 
 echo
-echo "[3/10] Enabling runit services..."
-
+echo "[3/9] Mengaktifkan runit services..."
 enable_service() {
     SERVICE="$1"
-
     if [ -e "/var/service/$SERVICE" ]; then
-        echo "  [OK] $SERVICE already enabled."
-        return 0
+        echo "Service $SERVICE sudah aktif."
+        return
     fi
 
     if [ -d "/etc/sv/$SERVICE" ]; then
         ln -s "/etc/sv/$SERVICE" "/var/service/$SERVICE"
-        echo "  [OK] Enabled $SERVICE."
+        echo "Enabled: $SERVICE"
     else
-        echo "  [SKIP] /etc/sv/$SERVICE not found."
+        echo "WARNING: /etc/sv/$SERVICE tidak ditemukan."
     fi
 }
 
@@ -147,31 +83,17 @@ enable_service seatd
 enable_service tlp
 enable_service zramen
 
-# ============================================================
-# USER GROUPS
-# ============================================================
-
 echo
-echo "[4/10] Configuring user groups..."
-
-for GROUP in _seatd audio video network; do
-
+echo "[4/9] Konfigurasi grup user..."
+for GROUP in _seatd audio video input network; do
     if getent group "$GROUP" >/dev/null 2>&1; then
         usermod -aG "$GROUP" "$USERNAME"
-        echo "  [OK] $USERNAME -> $GROUP"
-    else
-        echo "  [SKIP] Group $GROUP not found."
+        echo "User $USERNAME ditambahkan ke grup: $GROUP"
     fi
-
 done
 
-# ============================================================
-# DIRECTORIES
-# ============================================================
-
 echo
-echo "[5/10] Creating configuration directories..."
-
+echo "[5/9] Membuat struktur direktori konfigurasi..."
 mkdir -p "$USER_HOME/.config/sway"
 mkdir -p "$USER_HOME/.config/waybar"
 mkdir -p "$USER_HOME/.config/fuzzel"
@@ -179,328 +101,205 @@ mkdir -p "$USER_HOME/.config/mako"
 mkdir -p "$USER_HOME/.config/pipewire/pipewire.conf.d"
 mkdir -p "$USER_HOME/Pictures"
 
-chown "$USERNAME:$USER_GROUP" "$USER_HOME/.config"
-chown "$USERNAME:$USER_GROUP" "$USER_HOME/Pictures"
-
-# ============================================================
-# PIPEWIRE
-# ============================================================
-
 echo
-echo "[6/10] Configuring PipeWire..."
-
+echo "[6/9] Konfigurasi PipeWire..."
 WIREPLUMBER_CONF="/usr/share/examples/wireplumber/10-wireplumber.conf"
 PIPEWIRE_PULSE_CONF="/usr/share/examples/pipewire/20-pipewire-pulse.conf"
 
 if [ -f "$WIREPLUMBER_CONF" ]; then
-
-    ln -sf \
-        "$WIREPLUMBER_CONF" \
-        "$USER_HOME/.config/pipewire/pipewire.conf.d/10-wireplumber.conf"
-
-    echo "  [OK] WirePlumber configuration."
-
-else
-    echo "  [INFO] WirePlumber example config not found."
+    ln -sf "$WIREPLUMBER_CONF" "$USER_HOME/.config/pipewire/pipewire.conf.d/10-wireplumber.conf"
 fi
 
 if [ -f "$PIPEWIRE_PULSE_CONF" ]; then
-
-    ln -sf \
-        "$PIPEWIRE_PULSE_CONF" \
-        "$USER_HOME/.config/pipewire/pipewire.conf.d/20-pipewire-pulse.conf"
-
-    echo "  [OK] PipeWire PulseAudio compatibility."
-
-else
-    echo "  [INFO] PipeWire PulseAudio config not found."
+    ln -sf "$PIPEWIRE_PULSE_CONF" "$USER_HOME/.config/pipewire/pipewire.conf.d/20-pipewire-pulse.conf"
 fi
 
-# ============================================================
-# Sway
-# ============================================================
-
 echo
-echo "[7/10] Configuring Sway..."
+echo "[7/9] Menulis file konfigurasi UI..."
 
+# Sway Config
 SWAY_CONFIG="$USER_HOME/.config/sway/config"
-
 if [ ! -f "$SWAY_CONFIG" ]; then
-
 cat > "$SWAY_CONFIG" <<'EOF'
-### Toshiba Satellite P755
-### Sway configuration
+### Toshiba P755 Sway Configuration
 
 set $mod Mod4
-
 font pango:DejaVu Sans 10
+floating_modifier $mod normal
 
-# Wallpaper
-output * bg ~/Pictures/wallpaper.jpg fill
+# Autostart Services
+exec dbus-update-activation-environment --all
+exec /usr/libexec/polkit-gnome-authentication-agent-1
 
-# Applications
-exec Waybar
+# PipeWire: cukup jalankan "pipewire" saja. WirePlumber (session manager)
+# dan pipewire-pulse (interface PulseAudio) sudah otomatis di-spawn oleh
+# PipeWire lewat symlink di ~/.config/pipewire/pipewire.conf.d/ yang
+# dibuat script setup ini. Menjalankan "exec wireplumber" terpisah di sini
+# akan membuat WirePlumber start dua kali dan bisa bikin audio tidak stabil.
+exec pipewire
+
+exec waybar
 exec mako
 
-# Idle and lock
+# Wallpaper (Ganti jika sudah ada file wallpaper)
+output * bg ~/Pictures/wallpaper.jpg fill #1a1a1a
+
+# Idle & Lock Management
 exec swayidle -w \
-    timeout 300 'swaylock -f' \
+    timeout 300 'swaylock -f -c 000000' \
     timeout 600 'swaymsg "output * power off"' \
     resume 'swaymsg "output * power on"' \
-    before-sleep 'swaylock -f'
+    before-sleep 'swaylock -f -c 000000'
 
-# Terminal
+# Keybindings - Launchers & Tools
 bindsym $mod+Return exec foot
-
-# Launcher
 bindsym $mod+d exec fuzzel
-
-# File manager
 bindsym $mod+e exec thunar
-
-# Lock
-bindsym $mod+l exec swaylock -f
-
-# Kill window
+bindsym $mod+l exec swaylock -f -c 000000
 bindsym $mod+Shift+q kill
-
-# Reload
 bindsym $mod+Shift+c reload
-
-# Exit
 bindsym $mod+Shift+e exec swaymsg exit
 
-# Brightness
+# Navigation & Focus
+bindsym $mod+Left focus left
+bindsym $mod+Down focus down
+bindsym $mod+Up focus up
+bindsym $mod+Right focus right
+
+bindsym $mod+Shift+Left move left
+bindsym $mod+Shift+Down move down
+bindsym $mod+Shift+Up move up
+bindsym $mod+Shift+Right move right
+
+# Layout Management
+bindsym $mod+b splith
+bindsym $mod+v splitv
+bindsym $mod+f fullscreen toggle
+bindsym $mod+Shift+space floating toggle
+
+# Workspaces
+bindsym $mod+1 workspace number 1
+bindsym $mod+2 workspace number 2
+bindsym $mod+3 workspace number 3
+bindsym $mod+4 workspace number 4
+bindsym $mod+5 workspace number 5
+
+bindsym $mod+Shift+1 move container to workspace number 1
+bindsym $mod+Shift+2 move container to workspace number 2
+bindsym $mod+Shift+3 move container to workspace number 3
+bindsym $mod+Shift+4 move container to workspace number 4
+bindsym $mod+Shift+5 move container to workspace number 5
+
+# Function Keys (Brightness, Volume, Screenshot)
 bindsym XF86MonBrightnessUp exec brightnessctl set +5%
 bindsym XF86MonBrightnessDown exec brightnessctl set 5%-
 
-# Screenshot
-bindsym Print exec sh -c 'grim "$HOME/Pictures/screenshot-$(date +%Y-%m-%d_%H-%M-%S).png"'
+bindsym XF86AudioRaiseVolume exec wpctl set-volume -l 1.5 @DEFAULT_AUDIO_SINK@ 5%+
+bindsym XF86AudioLowerVolume exec wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-
+bindsym XF86AudioMute exec wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle
+
+bindsym Print exec grim ~/Pictures/screenshot-$(date +%Y-%m-%d_%H-%M-%S).png
+bindsym Shift+Print exec slurp | grim -g - ~/Pictures/screenshot-$(date +%Y-%m-%d_%H-%M-%S).png
 EOF
-
-    echo "  [OK] Sway configuration created."
-
-else
-    echo "  [SKIP] Sway configuration already exists."
 fi
 
-# ============================================================
-# WAYBAR
-# ============================================================
-
-echo
-echo "[8/10] Configuring Waybar..."
-
+# Waybar Config
 WAYBAR_CONFIG="$USER_HOME/.config/waybar/config.jsonc"
-WAYBAR_STYLE="$USER_HOME/.config/waybar/style.css"
-
 if [ ! -f "$WAYBAR_CONFIG" ]; then
-
 cat > "$WAYBAR_CONFIG" <<'EOF'
 {
     "position": "top",
     "height": 28,
-
-    "modules-left": [
-        "sway/workspaces"
-    ],
-
-    "modules-center": [
-        "clock"
-    ],
-
-    "modules-right": [
-        "network",
-        "pulseaudio",
-        "battery",
-        "cpu",
-        "memory"
-    ]
+    "modules-left": ["sway/workspaces"],
+    "modules-center": ["clock"],
+    "modules-right": ["pulseaudio", "network", "battery", "cpu", "memory"]
 }
 EOF
-
-    echo "  [OK] Waybar config created."
-
-else
-    echo "  [SKIP] Waybar config already exists."
 fi
 
+# Waybar Style
+WAYBAR_STYLE="$USER_HOME/.config/waybar/style.css"
 if [ ! -f "$WAYBAR_STYLE" ]; then
-
 cat > "$WAYBAR_STYLE" <<'EOF'
 * {
     font-family: DejaVu Sans;
     font-size: 12px;
 }
-
 window#waybar {
     background: rgba(30, 30, 30, 0.95);
+    color: #ffffff;
 }
-
-#clock,
-#network,
-#pulseaudio,
-#battery,
-#cpu,
-#memory {
-    padding: 0 8px;
+#workspaces button {
+    padding: 0 5px;
+    color: #888888;
+}
+#workspaces button.focused {
+    color: #ffffff;
+    background-color: #444444;
+}
+#clock, #network, #pulseaudio, #battery, #cpu, #memory {
+    padding: 0 10px;
 }
 EOF
-
-    echo "  [OK] Waybar style created."
-
-else
-    echo "  [SKIP] Waybar style already exists."
 fi
 
-# ============================================================
-# FUZZEL
-# ============================================================
-
-echo
-echo "[9/10] Configuring Fuzzel..."
-
+# Fuzzel Config
 FUZZEL_CONFIG="$USER_HOME/.config/fuzzel/fuzzel.ini"
-
 if [ ! -f "$FUZZEL_CONFIG" ]; then
-
 cat > "$FUZZEL_CONFIG" <<'EOF'
 [main]
 font=DejaVu Sans:size=10
 terminal=foot
-prompt=Run:
+prompt="Run: "
 EOF
-
-    echo "  [OK] Fuzzel configuration created."
-
-else
-    echo "  [SKIP] Fuzzel configuration already exists."
 fi
 
-# ============================================================
-# MAKO
-# ============================================================
-
-echo
-echo "[10/10] Configuring Mako..."
-
+# Mako Config
 MAKO_CONFIG="$USER_HOME/.config/mako/config"
-
 if [ ! -f "$MAKO_CONFIG" ]; then
-
 cat > "$MAKO_CONFIG" <<'EOF'
 font=DejaVu Sans 10
 background-color=#202020
 text-color=#ffffff
 border-size=1
+border-color=#444444
 border-radius=5
 default-timeout=5000
 EOF
-
-    echo "  [OK] Mako configuration created."
-
-else
-    echo "  [SKIP] Mako configuration already exists."
 fi
 
-# ============================================================
-# XDG RUNTIME DIRECTORY
-# ============================================================
-
 echo
-echo "Configuring XDG_RUNTIME_DIR..."
-
-RUNTIME_DIR="/run/user/$USER_UID"
-
-mkdir -p "$RUNTIME_DIR"
-chown "$USERNAME:$USER_GROUP" "$RUNTIME_DIR"
-chmod 700 "$RUNTIME_DIR"
-
-# ============================================================
-# BASH PROFILE
-# ============================================================
-
-echo
-echo "Configuring automatic Sway startup..."
-
+echo "[8/9] Konfigurasi autostart login TTY1..."
 BASH_PROFILE="$USER_HOME/.bash_profile"
 
 if [ ! -f "$BASH_PROFILE" ]; then
     touch "$BASH_PROFILE"
-    chown "$USERNAME:$USER_GROUP" "$BASH_PROFILE"
 fi
 
-if ! grep -q "dbus-run-session sway" "$BASH_PROFILE"; then
-
+if ! grep -q "sway" "$BASH_PROFILE"; then
 cat >> "$BASH_PROFILE" <<'EOF'
 
-# Void Linux Sway
-# Start Sway automatically on TTY1
+# Dynamic XDG_RUNTIME_DIR fallback for non-systemd init
+if [ -z "$XDG_RUNTIME_DIR" ]; then
+    export XDG_RUNTIME_DIR="/tmp/runtime-${USER}"
+    if [ ! -d "$XDG_RUNTIME_DIR" ]; then
+        mkdir -pm 0700 "$XDG_RUNTIME_DIR"
+    fi
+fi
 
+# Auto-start Sway on TTY1
 if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
-
-    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-
     exec dbus-run-session sway
-
 fi
 EOF
-
-    echo "  [OK] Automatic Sway startup configured."
-
-else
-    echo "  [SKIP] Sway startup already configured."
 fi
 
-# ============================================================
-# OWNERSHIP
-# ============================================================
-
 echo
-echo "Fixing configuration ownership..."
-
-chown -R "$USERNAME:$USER_GROUP" \
-    "$USER_HOME/.config/sway" \
-    "$USER_HOME/.config/waybar" \
-    "$USER_HOME/.config/fuzzel" \
-    "$USER_HOME/.config/mako" \
-    "$USER_HOME/.config/pipewire"
-
-chown "$USERNAME:$USER_GROUP" "$BASH_PROFILE"
-
-# ============================================================
-# DONE
-# ============================================================
+echo "[9/9] Memperbaiki file permissions..."
+chown -R "$USERNAME:$USER_GID" "$USER_HOME/.config" "$USER_HOME/.bash_profile" "$USER_HOME/Pictures"
 
 echo
 echo "========================================"
-echo " Setup selesai!"
+echo " Setup Selesai!"
+echo " Silakan reboot sistem Anda: sudo reboot"
 echo "========================================"
-echo
-echo "User : $USERNAME"
-echo "Home : $USER_HOME"
-echo
-echo "Enabled services:"
-echo "  dbus"
-echo "  NetworkManager"
-echo "  seatd"
-echo "  tlp"
-echo "  zramen"
-echo
-echo "Sway akan otomatis dijalankan ketika"
-echo "login ke TTY1."
-echo
-echo "Shortcut:"
-echo
-echo "  Super + Enter       Foot"
-echo "  Super + D           Fuzzel"
-echo "  Super + E           Thunar"
-echo "  Super + L           Lock"
-echo "  Super + Shift + Q   Kill window"
-echo "  Super + Shift + C   Reload Sway"
-echo "  Super + Shift + E   Exit Sway"
-echo
-echo "Reboot dengan:"
-echo
-echo "  reboot"
-echo
