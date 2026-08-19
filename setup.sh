@@ -24,15 +24,11 @@ USER_GID="$(id -g "$USERNAME")"
 
 echo
 echo "[1/9] Sinkronisasi repositori & update..."
-# XBPS meng-update dirinya sendiri dalam transaksi terpisah. Gunakan flag -y
-# agar tidak tertahan menunggu konfirmasi interaktif.
 xbps-install -Syu -y
 xbps-install -Syu -y
 
 echo
 echo "[2/9] Instalasi paket pendukung..."
-# Gunakan -Sy -y agar repodata tersinkronisasi dan instalasi berjalan non-interaktif.
-# Catatan penamaan paket XBPS (case-sensitive): Waybar, Thunar, NetworkManager.
 xbps-install -Sy -y \
     sway \
     swaybg \
@@ -139,18 +135,11 @@ floating_modifier $mod normal
 # Autostart Services
 exec dbus-update-activation-environment --all
 exec /usr/libexec/polkit-gnome-authentication-agent-1
-
-# PipeWire: cukup jalankan "pipewire" saja. WirePlumber (session manager)
-# dan pipewire-pulse (interface PulseAudio) sudah otomatis di-spawn oleh
-# PipeWire lewat symlink di ~/.config/pipewire/pipewire.conf.d/ yang
-# dibuat script setup ini. Menjalankan "exec wireplumber" terpisah di sini
-# akan membuat WirePlumber start dua kali dan bisa bikin audio tidak stabil.
 exec pipewire
-
 exec waybar
 exec mako
 
-# Wallpaper (Ganti jika sudah ada file wallpaper)
+# Wallpaper
 output * bg ~/Pictures/wallpaper.jpg fill #1a1a1a
 
 # Idle & Lock Management
@@ -160,7 +149,7 @@ exec swayidle -w \
     resume 'swaymsg "output * power on"' \
     before-sleep 'swaylock -f -c 000000'
 
-# Keybindings - Launchers & Tools
+# Keybindings
 bindsym $mod+Return exec foot
 bindsym $mod+d exec fuzzel
 bindsym $mod+e exec thunar
@@ -199,7 +188,7 @@ bindsym $mod+Shift+3 move container to workspace number 3
 bindsym $mod+Shift+4 move container to workspace number 4
 bindsym $mod+Shift+5 move container to workspace number 5
 
-# Function Keys (Brightness, Volume, Screenshot)
+# Function Keys
 bindsym XF86MonBrightnessUp exec brightnessctl set +5%
 bindsym XF86MonBrightnessDown exec brightnessctl set 5%-
 
@@ -278,22 +267,13 @@ EOF
 fi
 
 echo
-echo "[8/9] Konfigurasi autostart login TTY1..."
-# Marker unik agar deteksi idempotent aman (grep "sway" bisa false-positive
-# dan membuat blok terlewat, sehingga XDG_RUNTIME_DIR tidak pernah diset).
-SWAY_MARKER="void-sway-setup-block"
+echo "[8/9] Konfigurasi environment & autostart TTY1..."
+PROFILE="$USER_HOME/.profile"
+BASH_PROFILE="$USER_HOME/.bash_profile"
 
-write_sway_profile() {
-    FILE="$1"
-    if [ ! -f "$FILE" ]; then
-        touch "$FILE"
-    fi
-
-    if ! grep -q "$SWAY_MARKER" "$FILE"; then
-        cat >> "$FILE" <<'EOF'
-
-# === void-sway setup block (start) ===
-# Dynamic XDG_RUNTIME_DIR fallback for non-systemd init
+# Konfigurasi XDG_RUNTIME_DIR dan autostart Sway
+STARTUP_SNIPPET='
+# Dynamic XDG_RUNTIME_DIR fallback for Void Linux (runit)
 if [ -z "$XDG_RUNTIME_DIR" ]; then
     export XDG_RUNTIME_DIR="/tmp/runtime-${USER}"
     if [ ! -d "$XDG_RUNTIME_DIR" ]; then
@@ -302,27 +282,31 @@ if [ -z "$XDG_RUNTIME_DIR" ]; then
     chmod 0700 "$XDG_RUNTIME_DIR"
 fi
 
+export WLR_NO_HARDWARE_CURSORS=1
+
 # Auto-start Sway on TTY1
 if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
     exec dbus-run-session sway
 fi
-# === void-sway setup block (end) ===
-EOF
-        echo "Autostart sway ditambahkan ke: $FILE"
-    else
-        echo "Autostart sway sudah ada di: $FILE"
-    fi
-    chown "$USERNAME:$USER_GID" "$FILE"
-}
+'
 
-# bash-login membaca .bash_profile; sh/dash membaca .profile.
-# Tulis keduanya agar XDG_RUNTIME_DIR selalu tersedia apa pun shell-nya.
-write_sway_profile "$USER_HOME/.bash_profile"
-write_sway_profile "$USER_HOME/.profile"
+# Tulis ke .profile (standar POSIX)
+if [ ! -f "$PROFILE" ] || ! grep -q "sway" "$PROFILE"; then
+    printf "%s\n" "$STARTUP_SNIPPET" >> "$PROFILE"
+fi
+
+# Tulis ke .bash_profile agar bash login tetap mengeksekusinya
+if [ ! -f "$BASH_PROFILE" ] || ! grep -q "sway" "$BASH_PROFILE"; then
+    printf "%s\n" "$STARTUP_SNIPPET" >> "$BASH_PROFILE"
+fi
 
 echo
 echo "[9/9] Memperbaiki file permissions..."
-chown -hR "$USERNAME:$USER_GID" "$USER_HOME/.config" "$USER_HOME/.bash_profile" "$USER_HOME/.profile" "$USER_HOME/Pictures"
+chown -hR "$USERNAME:$USER_GID" \
+    "$USER_HOME/.config" \
+    "$USER_HOME/.profile" \
+    "$USER_HOME/.bash_profile" \
+    "$USER_HOME/Pictures"
 
 echo
 echo "========================================"
