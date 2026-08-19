@@ -279,15 +279,20 @@ fi
 
 echo
 echo "[8/9] Konfigurasi autostart login TTY1..."
-BASH_PROFILE="$USER_HOME/.bash_profile"
+# Marker unik agar deteksi idempotent aman (grep "sway" bisa false-positive
+# dan membuat blok terlewat, sehingga XDG_RUNTIME_DIR tidak pernah diset).
+SWAY_MARKER="void-sway-setup-block"
 
-if [ ! -f "$BASH_PROFILE" ]; then
-    touch "$BASH_PROFILE"
-fi
+write_sway_profile() {
+    FILE="$1"
+    if [ ! -f "$FILE" ]; then
+        touch "$FILE"
+    fi
 
-if ! grep -q "sway" "$BASH_PROFILE"; then
-cat >> "$BASH_PROFILE" <<'EOF'
+    if ! grep -q "$SWAY_MARKER" "$FILE"; then
+        cat >> "$FILE" <<'EOF'
 
+# === void-sway setup block (start) ===
 # Dynamic XDG_RUNTIME_DIR fallback for non-systemd init
 if [ -z "$XDG_RUNTIME_DIR" ]; then
     export XDG_RUNTIME_DIR="/tmp/runtime-${USER}"
@@ -301,12 +306,23 @@ fi
 if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
     exec dbus-run-session sway
 fi
+# === void-sway setup block (end) ===
 EOF
-fi
+        echo "Autostart sway ditambahkan ke: $FILE"
+    else
+        echo "Autostart sway sudah ada di: $FILE"
+    fi
+    chown "$USERNAME:$USER_GID" "$FILE"
+}
+
+# bash-login membaca .bash_profile; sh/dash membaca .profile.
+# Tulis keduanya agar XDG_RUNTIME_DIR selalu tersedia apa pun shell-nya.
+write_sway_profile "$USER_HOME/.bash_profile"
+write_sway_profile "$USER_HOME/.profile"
 
 echo
 echo "[9/9] Memperbaiki file permissions..."
-chown -hR "$USERNAME:$USER_GID" "$USER_HOME/.config" "$USER_HOME/.bash_profile" "$USER_HOME/Pictures"
+chown -hR "$USERNAME:$USER_GID" "$USER_HOME/.config" "$USER_HOME/.bash_profile" "$USER_HOME/.profile" "$USER_HOME/Pictures"
 
 echo
 echo "========================================"
